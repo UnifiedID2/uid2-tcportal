@@ -1,0 +1,46 @@
+stages:
+    - build
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_ID               # Don't execute jobs in merge request context
+      when: never
+    - if: $CI_COMMIT_BRANCH                  # Execute jobs when a new commit is pushed to some branch
+
+build:
+  image: proxy.docker.adsrvr.org/docker:git
+  services:
+      - docker:dind
+  stage: build
+  variables:
+    IMAGE_PATH: "uid2-tcportal"
+  script:
+    - IMAGE_VERSION=1.0.0
+    - echo Project version is $IMAGE_VERSION
+    - GIT_COMMIT="$(git show --format="%h" --no-patch)"
+    - >
+        if [ $CI_COMMIT_BRANCH = "master" ]; then
+            IMAGE_VERSION="v${IMAGE_VERSION}.${GIT_COMMIT}"
+        else
+            IMAGE_VERSION="v${IMAGE_VERSION}-${CI_COMMIT_BRANCH}.${GIT_COMMIT}"
+        fi
+    - echo Docker image version will be $IMAGE_VERSION
+    - echo "Building ${DOCKER_REGISTRY}/${IMAGE_PATH}:${IMAGE_VERSION}..."
+    - docker build -t ${DOCKER_REGISTRY}/${IMAGE_PATH}:${IMAGE_VERSION} .
+    - docker tag ${DOCKER_REGISTRY}/${IMAGE_PATH}:${IMAGE_VERSION} ${DOCKER_REGISTRY}/${IMAGE_PATH}:latest
+    - docker login ${DOCKER_REGISTRY} -u ${DOCKER_USER} -p ${DOCKER_PASS}
+    - docker push ${DOCKER_REGISTRY}/${IMAGE_PATH}:${IMAGE_VERSION}
+    - docker push ${DOCKER_REGISTRY}/${IMAGE_PATH}:latest
+    - docker logout ${DOCKER_REGISTRY}
+    - mkdir out
+    - echo ${IMAGE_VERSION} > out/build.version
+  artifacts:
+    when: on_success
+    paths:
+        - out/build.version
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"' #always build on master if there are changes
+      when: always
+    - if: '$CI_COMMIT_BRANCH != "master"' #otherwise allow manual job to push to internal registry
+      when: manual
+    - when: never #otherwise disable the job
